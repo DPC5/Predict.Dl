@@ -3,7 +3,7 @@ from discord import app_commands, colour
 from discord.ext import commands
 import json
 import asyncio
-from api import get_deadlock_hero_stats, HEROS, get_hero_stats, get_most_played_heros, resolve_steam_id, steam64_to_steamid3, STEAM_API_KEY
+from api import get_deadlock_hero_stats, HEROS, get_hero_stats, get_most_played_heros, resolve_steam_id, steam64_to_steamid3, get_hero_rank, STEAM_API_KEY
 import requests
 
 TEST_GUILD = discord.Object(id=1349068689521115197)
@@ -53,6 +53,41 @@ async def update_activity():
         await bot.change_presence(activity=discord.Streaming(name="{} Predictions".format(predicts), url="https://www.twitch.tv/morememes_"))
         await asyncio.sleep(30)
 
+# Emojis
+
+RANK_NAMES = [
+    "unranked",    # Obscurus
+    "initiate",
+    "seeker",
+    "alchemist",
+    "arcanist",
+    "ritualist",
+    "emissary",
+    "archon",
+    "oracle",
+    "phantom",
+    "ascendant",
+    "eternus"
+]
+
+
+RANK_EMOJIS = {}
+rank_id = 1
+
+for rank_name in RANK_NAMES:
+    if rank_name == "unranked":
+        RANK_EMOJIS[0] = "obscurus"
+        continue
+    for tier in range(1, 7):
+        RANK_EMOJIS[rank_id] = f"{rank_name}_{tier}"
+        rank_id += 1
+
+def get_rank_emoji(rank_number: int, bot: commands.Bot):
+    emoji_name = RANK_EMOJIS.get(rank_number)
+    if emoji_name:
+        return discord.utils.get(bot.emojis, name=emoji_name)
+    return None
+
 # BOT COMMANDS
 
 @bot.tree.command(name="info", description="Get information about Predict.Dl", guild=TEST_GUILD)
@@ -81,8 +116,20 @@ async def lookup(interaction: discord.Interaction, account: str):
         return await progress_msg.edit(content=f"Error: {e}")
 
     url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={steam64}"
-    resp = requests.get(url, timeout=10).json()
-    player_info = resp['response']['players'][0]
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        return await progress_msg.edit(content=f"Failed to contact Steam API: {e}")
+    except ValueError:
+        return await progress_msg.edit(content="Steam API returned invalid data.")
+
+    if not data.get('response', {}).get('players'):
+        return await progress_msg.edit(content="Could not find that Steam account.")
+
+    player_info = data['response']['players'][0]
     vanity_name = player_info.get('personaname', steam64)
     avatar_url = player_info.get('avatarfull', None)
 
@@ -94,29 +141,28 @@ async def lookup(interaction: discord.Interaction, account: str):
     most_played_hero_id = get_most_played_heros(hero_stats)[0][2]
     player_stats = get_hero_stats(hero_stats, most_played_hero_id)
 
+    rank_info = get_hero_rank(most_played_hero_id, steam64_to_steamid3(steam64))
+    rank_number = rank_info['rank'] if rank_info else 0
+    print(rank_number)
+    rank_emoji = get_rank_emoji(rank_number, bot)
+    print(rank_emoji)
+    rank_display = f"{rank_emoji} " if rank_emoji else ""
+
     await progress_msg.edit(content="Building player stats embed... 🛠️")
 
     steam_url = f"https://steamcommunity.com/profiles/{steam64}"
     embed = discord.Embed(
-        title=f"Player Info: [{vanity_name}]({steam_url})",
-        description=f"Most Played Hero: **{HEROS.get(player_stats['hero_id'], 'Unknown')}**",
+        title=f" ",
+        description = f"Most Played Hero: {rank_display}**{HEROS.get(player_stats['hero_id'], 'Unknown')}**",
         color=discord.Color.green()
     )
-
-    embed.set_author(name="Predict.Dl Player Stats")
+    embed.set_author(name=vanity_name, url=steam_url, icon_url="attachment://steam.png")
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
-    embed.add_field(name="Matches Played", value=player_stats['matches_played'], inline=True)
-    embed.add_field(name="Wins", value=player_stats['wins'], inline=True)
-    embed.add_field(name="Ending Level", value=f"{player_stats['ending_level']:.2f}", inline=True)
-    embed.add_field(name="Kills", value=player_stats['kills'], inline=True)
-    embed.add_field(name="Deaths", value=player_stats['deaths'], inline=True)
-    embed.add_field(name="Assists", value=player_stats['assists'], inline=True)
-    embed.add_field(name="Kills/Min", value=f"{player_stats['kills_per_min']:.2f}", inline=True)
-    embed.add_field(name="Deaths/Min", value=f"{player_stats['deaths_per_min']:.2f}", inline=True)
-    embed.add_field(name="Assists/Min", value=f"{player_stats['assists_per_min']:.2f}", inline=True)
-    embed.add_field(name="Networth/Min", value=f"{player_stats['networth_per_min']:.2f}", inline=True)
+    embed.add_field(name="General", value=f"Matches Played: {player_stats['matches_played']}\nWins: {player_stats['wins']}\nEnding Level: {player_stats['ending_level']:.2f}", inline=False)
+    embed.add_field(name="Performance", value=f"Kills: {player_stats['kills']}\nDeaths: {player_stats['deaths']}\nAssists: {player_stats['assists']}", inline=False)
+    embed.add_field(name="Rates", value=f"Kills/Min: {player_stats['kills_per_min']:.2f}\nDeaths/Min: {player_stats['deaths_per_min']:.2f}\nAssists/Min: {player_stats['assists_per_min']:.2f}\nNetworth/Min: {player_stats['networth_per_min']:.2f}", inline=False)
 
     await progress_msg.edit(content="Here are the stats! ✅", embed=embed)
 

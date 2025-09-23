@@ -109,3 +109,23 @@ def get_hero_stats(input_value, hero_id):
     return None
 
 # print(get_hero_stats(test, get_most_played_heros(test)[0][2]))
+
+
+def get_hero_rank(hero_id: int, steamid3: str):
+    """
+    Fetch the MMR/rank for a specific hero for a given SteamID3.
+    Returns a dictionary with rank info.
+    """
+    url = f"https://api.deadlock-api.com/v1/players/mmr/{hero_id}?account_ids={steamid3}"
+    print(url)
+    resp = requests.get(url, timeout=10)
+    if resp.status_code != 200:
+        raise ValueError(f"Failed to fetch rank for hero {hero_id}")
+    data = resp.json()
+
+    if not data:
+        return None
+
+    return data[0]
+
+# print(get_hero_rank(get_most_played_heros(test)[0][2], steam64_to_steamid3(resolve_steam_id("https://steamcommunity.com/id/435345325"))))
