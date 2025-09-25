@@ -218,6 +218,11 @@ async def info(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
+#lookup commands, basic stats and rank, no PR yet
+
+#TODO
+# add PR
+# add caching
 
 @bot.tree.command(name="lookup", description="Look up a Deadlock player by account or name", guild=TEST_GUILD)
 async def lookup(interaction: discord.Interaction, account: str):
@@ -251,12 +256,12 @@ async def lookup(interaction: discord.Interaction, account: str):
 
     await progress_msg.edit(content="Fetching hero stats... 🔍")
 
-    hero_stats = get_deadlock_hero_stats(account)
-    await progress_msg.edit(content="Calculating most played hero... 📊")
+    hero_stats = await get_deadlock_hero_stats(account)
+    await progress_msg.edit(content="Calculating stats... 📊")
     
     most_played_hero_id = get_most_played_heros(hero_stats)[0][2]
     player_stats = get_hero_stats(hero_stats, most_played_hero_id)
-    hero_rank = get_hero_rank(most_played_hero_id, steamid3)
+    hero_rank = await get_hero_rank(most_played_hero_id, steamid3)
 
     rank_emoji = player_to_emoji(hero_rank)
     rank_display = f"{rank_emoji} " if rank_emoji else ""

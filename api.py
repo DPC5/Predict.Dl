@@ -158,15 +158,15 @@ async def get_hero_rank(hero_id: int, steamid3: str):
 
 # Testing
 
-async def testing():
-    stats = await get_deadlock_hero_stats("https://steamcommunity.com/id/435345325")
-    ret = await get_hero_rank(get_most_played_heros(stats)[0][2], steam64_to_steamid3(resolve_steam_id("https://steamcommunity.com/id/435345325")))
-    return ret
+# async def testing():
+#     stats = await get_deadlock_hero_stats("https://steamcommunity.com/id/435345325")
+#     ret = await get_hero_rank(get_most_played_heros(stats)[0][2], steam64_to_steamid3(resolve_steam_id("https://steamcommunity.com/id/435345325")))
+#     return ret
 
-def test_manual_async_function():
-    loop = asyncio.get_event_loop()
-    result = loop.run_until_complete(testing())
-    loop.close()
-    print(result)
+# def test_manual_async_function():
+#     loop = asyncio.get_event_loop()
+#     result = loop.run_until_complete(testing())
+#     loop.close()
+#     print(result)
 
-test_manual_async_function()
+# test_manual_async_function()
