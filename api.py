@@ -1,6 +1,13 @@
 import requests
 import re
 import json
+import asyncio
+import aiohttp
+
+# TODO
+# remake each function to be async
+
+
 
 CONFIG_FILE = 'data/config.json'
 STATS_FILE = 'data/stats.json'
@@ -66,18 +73,16 @@ def steam64_to_steamid3(steam64: str) -> str:
 
 # Deadlock API Interaction
 
-def get_deadlock_hero_stats(input_value: str):
+async def get_deadlock_hero_stats(input_value: str):
 
     steam64 = resolve_steam_id(input_value)
     steamid3 = steam64_to_steamid3(steam64)
+    async with aiohttp.ClientSession() as session:
+        url = f"https://api.deadlock-api.com/v1/players/hero-stats?account_ids={steamid3}"
+        async with session.get(url) as response:
+            data = await response.json()
 
-    url = f"https://api.deadlock-api.com/v1/players/hero-stats?account_ids={steamid3}"
-
-    print(url)
-    resp = requests.get(url, timeout=10)
-
-    print(resp.json())
-    return resp.json()
+    return data
 
 # print (resolve_steam_id("https://steamcommunity.com/id/435345325"))
 # print(steam64_to_steamid3(resolve_steam_id("https://steamcommunity.com/id/435345325")))
@@ -87,6 +92,7 @@ def get_deadlock_hero_stats(input_value: str):
 with open('data/test-stats.json', 'r', encoding="utf-8") as file:
     test = json.load(file)
 
+# shouldnt need this to be async
 
 def get_most_played_heros(input_value):
 
@@ -102,6 +108,8 @@ def get_most_played_heros(input_value):
 
 # print(get_most_played_heros(test))
 
+# just calcs no need to async 
+
 def get_hero_stats(input_value, hero_id):
     for hero in input_value:
         if hero['hero_id'] == hero_id:
@@ -111,21 +119,54 @@ def get_hero_stats(input_value, hero_id):
 # print(get_hero_stats(test, get_most_played_heros(test)[0][2]))
 
 
-def get_hero_rank(hero_id: int, steamid3: str):
+# def get_hero_rank(hero_id: int, steamid3: str):
+#     """
+#     Fetch the MMR/rank for a specific hero for a given SteamID3.
+#     Returns a dictionary with rank info.
+#     """
+#     url = f"https://api.deadlock-api.com/v1/players/mmr/{hero_id}?account_ids={steamid3}"
+#     print(url)
+#     resp = requests.get(url, timeout=10)
+#     if resp.status_code != 200:
+#         raise ValueError(f"Failed to fetch rank for hero {hero_id}")
+#     data = resp.json()
+
+#     if not data:
+#         return None
+
+#     return data[0]
+
+async def get_hero_rank(hero_id: int, steamid3: str):
     """
     Fetch the MMR/rank for a specific hero for a given SteamID3.
     Returns a dictionary with rank info.
     """
-    url = f"https://api.deadlock-api.com/v1/players/mmr/{hero_id}?account_ids={steamid3}"
-    print(url)
-    resp = requests.get(url, timeout=10)
-    if resp.status_code != 200:
-        raise ValueError(f"Failed to fetch rank for hero {hero_id}")
-    data = resp.json()
-
+    async with aiohttp.ClientSession() as session:
+        url = f"https://api.deadlock-api.com/v1/players/mmr/{hero_id}?account_ids={steamid3}"
+        async with session.get(url) as response:
+            data = await response.json()
     if not data:
         return None
 
     return data[0]
 
+
 # print(get_hero_rank(get_most_played_heros(test)[0][2], steam64_to_steamid3(resolve_steam_id("https://steamcommunity.com/id/435345325"))))
+
+
+
+
+# Testing
+
+async def testing():
+    stats = await get_deadlock_hero_stats("https://steamcommunity.com/id/435345325")
+    ret = await get_hero_rank(get_most_played_heros(stats)[0][2], steam64_to_steamid3(resolve_steam_id("https://steamcommunity.com/id/435345325")))
+    return ret
+
+def test_manual_async_function():
+    loop = asyncio.get_event_loop()
+    result = loop.run_until_complete(testing())
+    loop.close()
+    print(result)
+
+test_manual_async_function()
