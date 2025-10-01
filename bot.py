@@ -3,7 +3,7 @@ from discord import app_commands, colour
 from discord.ext import commands
 import json
 import asyncio
-from api import get_deadlock_hero_stats, HEROS, get_hero_stats, get_most_played_heros, resolve_steam_id, steam64_to_steamid3, get_hero_rank, STEAM_API_KEY
+from api import get_deadlock_hero_stats, HEROS, get_hero_stats, get_most_played_heros, resolve_steam_id, steam64_to_steamid3, get_hero_rank, STEAM_API_KEY, calcPr
 import requests
 
 TEST_GUILD = discord.Object(id=1349068689521115197)
@@ -224,9 +224,11 @@ async def info(interaction: discord.Interaction):
 # add PR
 # add caching
 
+
 @bot.tree.command(name="lookup", description="Look up a Deadlock player by account or name", guild=TEST_GUILD)
 async def lookup(interaction: discord.Interaction, account: str):
     
+    hero = None
     await interaction.response.defer()
     progress_msg = await interaction.followup.send("Resolving Steam ID... ⏳")
 
@@ -259,12 +261,21 @@ async def lookup(interaction: discord.Interaction, account: str):
     hero_stats = await get_deadlock_hero_stats(account)
     await progress_msg.edit(content="Calculating stats... 📊")
     
-    most_played_hero_id = get_most_played_heros(hero_stats)[0][2]
-    player_stats = get_hero_stats(hero_stats, most_played_hero_id)
-    hero_rank = await get_hero_rank(most_played_hero_id, steamid3)
+    if hero == None:
+        select_hero = get_most_played_heros(hero_stats)[0][2]
+
+    player_stats = get_hero_stats(hero_stats, select_hero)
+    hero_rank = await get_hero_rank(select_hero, steamid3)
 
     rank_emoji = player_to_emoji(hero_rank)
     rank_display = f"{rank_emoji} " if rank_emoji else ""
+
+    await progress_msg.edit(content="Calculating player rating... 📊")
+
+    try:
+        pr = calcPr(hero_stats)['overall_pr']
+    except Exception as e:
+        return await progress_msg.edit(content=f"Error calculating PR: {e}")
 
     await progress_msg.edit(content="Building player stats embed... 🛠️")
 
@@ -278,6 +289,7 @@ async def lookup(interaction: discord.Interaction, account: str):
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
+    embed.add_field(name="PR", value=f"PR: **{pr:.2f}**", inline=False)
     embed.add_field(name="General", value=f"Matches Played: {player_stats['matches_played']}\nWins: {player_stats['wins']}\nEnding Level: {player_stats['ending_level']:.2f}", inline=False)
     embed.add_field(name="Performance", value=f"Kills: {player_stats['kills']}\nDeaths: {player_stats['deaths']}\nAssists: {player_stats['assists']}", inline=False)
     embed.add_field(name="Rates", value=f"Kills/Min: {player_stats['kills_per_min']:.2f}\nDeaths/Min: {player_stats['deaths_per_min']:.2f}\nAssists/Min: {player_stats['assists_per_min']:.2f}\nNetworth/Min: {player_stats['networth_per_min']:.2f}", inline=False)

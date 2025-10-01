@@ -170,3 +170,209 @@ async def get_hero_rank(hero_id: int, steamid3: str):
 #     print(result)
 
 # test_manual_async_function()
+
+def calcPr(player_stats):
+    """
+    Calculate a player rating (PR) from a list of hero stats.
+
+    Inputs:
+      - player_stats: list of dicts (each dict is a hero stats entry like in data/test-stats.json)
+      - Uses fields if present: matches_played, wins, kills_per_min, deaths_per_min,
+        assists_per_min, networth_per_min, damage_per_min, obj_damage_per_min,
+        accuracy, crit_shot_rate, ending_level, last_played
+
+    Output: dict with:
+      - overall_pr: float (aggregated rating)
+      - heroes: list of per-hero breakdowns with hero_id, hero_name, score, weight, matches_played
+
+    The implementation is intentionally simple and tweakable: a small set of weights
+    are exposed in `params` and the function gives more influence to heroes with
+    more matches and more recent play (exponential decay by `recency_half_days`).
+
+    Edge cases handled: missing fields, zero-match heroes ignored for overall aggregation.
+    """
+
+    import math
+    import time
+
+
+    params = {
+        "recency_half_days": 90.0,  
+        "match_confidence_scale": 1.0,  
+        "w_win": 2.0,
+        "w_kills": 1.0,
+        "w_assists": 0.8,
+        "w_deaths": 1.0,  
+        "w_networth": 1.0,
+        "w_damage": 1.2,
+        "w_obj": 0.9,
+        "w_accuracy": 0.6,
+        "w_crit": 0.4,
+        "w_level": 0.3,
+        # PR scaling
+        "pr_per_tier": 100,
+        "max_pr_tiers": 66,
+    }
+
+    MAX_PR = params["pr_per_tier"] * params["max_pr_tiers"]  # e.g. 100 * 66 = 6600 (cap at Eternus 6)
+
+    now_ts = time.time()
+    decay_seconds = params["recency_half_days"] * 24 * 3600
+
+    # Helper to compute recency weight from last_played timestamp
+    print('recency')
+    def recency_weight(last_played_ts):
+        if not last_played_ts:
+            return 0.5
+        try:
+            age = max(0.0, now_ts - float(last_played_ts))
+        except Exception:
+            return 0.5
+        # exponential decay with half-life
+        return 0.5 ** (age / decay_seconds)
+
+    # Accept either a list of hero stats or a single hero dict
+    single_input = False
+    if isinstance(player_stats, dict):
+        single_input = True
+        heroes_list = [player_stats]
+    else:
+        heroes_list = list(player_stats or [])
+
+    # Collect maxima for simple normalization across the player's heroes
+    max_vals = {
+        "kills_per_min": 0.0,
+        "assists_per_min": 0.0,
+        "deaths_per_min": 0.0,
+        "networth_per_min": 0.0,
+        "damage_per_min": 0.0,
+        "obj_damage_per_min": 0.0,
+        "accuracy": 0.0,
+        "crit_shot_rate": 0.0,
+        "ending_level": 0.0,
+    }
+
+    print('hero list')
+    for h in heroes_list:
+        for k in ("kills_per_min", "assists_per_min", "deaths_per_min", "networth_per_min", "damage_per_min", "obj_damage_per_min", "accuracy", "crit_shot_rate", "ending_level"):
+            v = h.get(k)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except Exception:
+                continue
+            if fv > max_vals[k]:
+                max_vals[k] = fv
+
+    # Avoid divide by zero by setting minima
+    for k in list(max_vals.keys()):
+        if max_vals[k] <= 0:
+            max_vals[k] = 1.0
+
+    # feature total weight (for normalization)
+    feature_weight_sum = sum([v for k, v in params.items() if k.startswith("w_")])
+
+    hero_results = []
+    total_weight = 0.0
+    weighted_norm_score_sum = 0.0
+
+    for h in heroes_list:
+        matches = h.get("matches_played", 0) or 0
+        if matches <= 0:
+            # include breakdown with zeros
+            hero_results.append({
+                "hero_id": h.get("hero_id"),
+                "hero_name": HEROS.get(h.get("hero_id"), "Unknown"),
+                "matches_played": matches,
+                "raw_score": 0.0,
+                "score": 0.0,
+                "weight": 0.0,
+                "hero_pr": 0.0,
+            })
+            continue
+
+        wins = h.get("wins", 0) or 0
+        win_rate = float(wins) / float(matches) if matches > 0 else 0.0
+
+        # Normalized features (0..1)
+        nk = float(h.get("kills_per_min") or 0.0) / max_vals["kills_per_min"]
+        na = float(h.get("assists_per_min") or 0.0) / max_vals["assists_per_min"]
+        nd = 1.0 - (float(h.get("deaths_per_min") or 0.0) / max_vals["deaths_per_min"]) if max_vals["deaths_per_min"] > 0 else 1.0
+        nn = float(h.get("networth_per_min") or 0.0) / max_vals["networth_per_min"]
+        ndmg = float(h.get("damage_per_min") or 0.0) / max_vals["damage_per_min"]
+        nobj = float(h.get("obj_damage_per_min") or 0.0) / max_vals["obj_damage_per_min"]
+        nacc = float(h.get("accuracy") or 0.0) / max_vals["accuracy"]
+        ncrit = float(h.get("crit_shot_rate") or 0.0) / max_vals["crit_shot_rate"]
+        nlevel = float(h.get("ending_level") or 0.0) / max_vals["ending_level"]
+
+        # Weighted sum (raw)
+        raw_score = (
+            params["w_win"] * win_rate +
+            params["w_kills"] * nk +
+            params["w_assists"] * na +
+            params["w_deaths"] * nd +
+            params["w_networth"] * nn +
+            params["w_damage"] * ndmg +
+            params["w_obj"] * nobj +
+            params["w_accuracy"] * nacc +
+            params["w_crit"] * ncrit +
+            params["w_level"] * nlevel
+        )
+
+        # normalize raw score to 0..1 by dividing by feature weight sum
+        norm_score = (raw_score / feature_weight_sum) if feature_weight_sum > 0 else 0.0
+
+        # Confidence / importance weight: based on matches and recency
+        rec_w = recency_weight(h.get("last_played"))
+        match_conf = (matches ** 0.5) * params["match_confidence_scale"]
+        weight = match_conf * rec_w
+
+        weighted_norm_score_sum += norm_score * weight
+        total_weight += weight
+
+        # scale per-hero PR to MAX_PR range
+        hero_pr = norm_score * MAX_PR
+
+        hero_results.append({
+            "hero_id": h.get("hero_id"),
+            "hero_name": HEROS.get(h.get("hero_id"), "Unknown"),
+            "matches_played": matches,
+            "raw_score": round(raw_score, 4),
+            "score": round(norm_score, 4),
+            "weight": round(weight, 4),
+            "win_rate": round(win_rate, 4),
+            "hero_pr": round(hero_pr, 2),
+        })
+
+    print('hero list pass')
+    overall_norm = (weighted_norm_score_sum / total_weight) if total_weight > 0 else 0.0
+
+    # scale to user-requested PR scale: 0..MAX_PR where each 100 PR = new tier
+    overall_pr = overall_norm * MAX_PR
+
+    # badge/tier calculation: rank_index (0-based) where 0 = Initiate 1, ... max = max_pr_tiers-1
+    rank_index = int(math.floor(overall_pr / params["pr_per_tier"])) if overall_pr > 0 else 0
+    rank_index = max(0, min(params["max_pr_tiers"] - 1, rank_index))
+    badge_num = rank_index + 1  # 1-based badge numbering matches bot.number_to_rank_emoji
+
+    # When input was a single hero dict, attach general_pr into it for backwards compatibility
+    if single_input:
+        print('single input')
+        out = heroes_list[0]
+        out["general_pr"] = round(overall_pr, 2)
+        out["pr_badge"] = int(badge_num)
+        out["pr_rank_index"] = int(rank_index)
+        out["pr_max"] = int(MAX_PR)
+        out["pr_params"] = params
+        out["hero_pr"] = hero_results[0]["hero_pr"] if hero_results else 0.0
+        return out
+
+    # return structure for list input
+    return {
+        "overall_pr": round(overall_pr, 2),
+        "badge": int(badge_num),
+        "rank_index": int(rank_index),
+        "heroes": sorted(hero_results, key=lambda x: x.get("weight", 0), reverse=True),
+        "params": params,
+    }
